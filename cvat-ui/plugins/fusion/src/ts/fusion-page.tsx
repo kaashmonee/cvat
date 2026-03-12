@@ -2,10 +2,11 @@
 //
 // SPDX-License-Identifier: MIT
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, {
+    useState, useEffect, useCallback, useMemo,
+} from 'react';
 import { RouteComponentProps, useLocation } from 'react-router-dom';
 import Layout from 'antd/lib/layout';
-import Slider from 'antd/lib/slider';
 import Spin from 'antd/lib/spin';
 import Typography from 'antd/lib/typography';
 import Row from 'antd/lib/row';
@@ -13,17 +14,16 @@ import Col from 'antd/lib/col';
 import Alert from 'antd/lib/alert';
 import Button from 'antd/lib/button';
 import notification from 'antd/lib/notification';
-import { SaveOutlined } from '@ant-design/icons';
+import Tooltip from 'antd/lib/tooltip';
+import { ReloadOutlined } from '@ant-design/icons';
 
 import { getCore } from './index';
-import Canvas2DPanel from './panels/canvas2d-panel';
-import Canvas3DPanel from './panels/canvas3d-panel';
 import LinkControls from './panels/link-controls';
 import AnnotationList from './panels/annotation-list';
 import { getLinkIdFromState } from './utils/color';
 import { LINK_ID_ATTR_NAME } from './consts';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 function generateUUID(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -44,7 +44,6 @@ function FusionPage(props: Props): JSX.Element {
     const location = useLocation();
     const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
 
-    // Support both /fusion?task2d=X&task3d=Y  and legacy /fusion/:projectId
     const task2dParam = queryParams.get('task2d');
     const task3dParam = queryParams.get('task3d');
     const projectIdParam = match.params.projectId;
@@ -54,16 +53,28 @@ function FusionPage(props: Props): JSX.Element {
     const [error, setError] = useState<string | null>(null);
     const [job2d, setJob2d] = useState<any>(null);
     const [job3d, setJob3d] = useState<any>(null);
-    const [frame, setFrame] = useState(0);
-    const [maxFrame, setMaxFrame] = useState(0);
+    const [task2dId, setTask2dId] = useState<number | null>(null);
+    const [task3dId, setTask3dId] = useState<number | null>(null);
     const [annotations2d, setAnnotations2d] = useState<any[]>([]);
     const [annotations3d, setAnnotations3d] = useState<any[]>([]);
     const [selected2d, setSelected2d] = useState<any>(null);
     const [selected3d, setSelected3d] = useState<any>(null);
     const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
-    const [headerLabel, setHeaderLabel] = useState<string>('Fusion Viewer');
+    const [headerLabel, setHeaderLabel] = useState<string>('Fusion Editor');
+    const [refreshing, setRefreshing] = useState(false);
 
-    // Load tasks/jobs on mount — supports both task-based and legacy project-based modes
+    // Build iframe URLs once we have job + task IDs
+    const iframe2dUrl = useMemo(() => {
+        if (!task2dId || !job2d) return null;
+        return `/tasks/${task2dId}/jobs/${job2d.id}`;
+    }, [task2dId, job2d]);
+
+    const iframe3dUrl = useMemo(() => {
+        if (!task3dId || !job3d) return null;
+        return `/tasks/${task3dId}/jobs/${job3d.id}`;
+    }, [task3dId, job3d]);
+
+    // Load tasks/jobs on mount
     useEffect(() => {
         let cancelled = false;
 
@@ -77,7 +88,6 @@ function FusionPage(props: Props): JSX.Element {
             if (!task2d) { setError(`2D task #${t2dId} not found`); return; }
             if (!task3d) { setError(`3D task #${t3dId} not found`); return; }
 
-            // First discover job IDs, then re-fetch by jobID so labels are included
             const jobsList2d = await core.jobs.get({ taskID: task2d.id });
             const jobsList3d = await core.jobs.get({ taskID: task3d.id });
 
@@ -87,15 +97,15 @@ function FusionPage(props: Props): JSX.Element {
                 return;
             }
 
-            // Re-fetch by jobID to ensure labels are populated
             const [fullJob2d] = await core.jobs.get({ jobID: jobsList2d[0].id });
             const [fullJob3d] = await core.jobs.get({ jobID: jobsList3d[0].id });
 
             if (cancelled) return;
             setJob2d(fullJob2d);
             setJob3d(fullJob3d);
-            setMaxFrame(Math.min(task2d.size, task3d.size) - 1);
-            setHeaderLabel(`Fusion Viewer — 2D #${task2d.id} + 3D #${task3d.id}`);
+            setTask2dId(task2d.id);
+            setTask3dId(task3d.id);
+            setHeaderLabel(`Fusion Editor — 2D #${task2d.id} + 3D #${task3d.id}`);
         }
 
         async function initFromProject(pid: number): Promise<void> {
@@ -127,8 +137,9 @@ function FusionPage(props: Props): JSX.Element {
             if (cancelled) return;
             setJob2d(fullJob2d);
             setJob3d(fullJob3d);
-            setMaxFrame(Math.min(task2d.size, task3d.size) - 1);
-            setHeaderLabel(`Fusion Viewer — Project #${pid}`);
+            setTask2dId(task2d.id);
+            setTask3dId(task3d.id);
+            setHeaderLabel(`Fusion Editor — Project #${pid}`);
         }
 
         async function init(): Promise<void> {
@@ -156,31 +167,35 @@ function FusionPage(props: Props): JSX.Element {
         return () => { cancelled = true; };
     }, [task2dParam, task3dParam, projectIdParam, isTaskMode]);
 
-    // Fetch annotations when frame or jobs change
-    useEffect(() => {
-        let cancelled = false;
+    // Fetch annotations for the linking panel (frame 0 initially, refreshable)
+    const fetchAnnotations = useCallback(async (showNotification = false) => {
+        if (!job2d || !job3d) return;
+        try {
+            // Clear cached annotations so we get fresh data from the server
+            job2d.annotations.clear();
+            job3d.annotations.clear();
 
-        async function fetchAnnotations(): Promise<void> {
-            if (!job2d || !job3d) return;
-
-            try {
-                const [ann2d, ann3d] = await Promise.all([
-                    job2d.annotations.get(frame),
-                    job3d.annotations.get(frame),
-                ]);
-                if (cancelled) return;
-                setAnnotations2d(ann2d);
-                setAnnotations3d(ann3d);
-            } catch (err: any) {
-                if (!cancelled) {
-                    notification.error({ message: 'Failed to load annotations', description: err?.message });
-                }
+            const [ann2d, ann3d] = await Promise.all([
+                job2d.annotations.get(0),
+                job3d.annotations.get(0),
+            ]);
+            setAnnotations2d(ann2d);
+            setAnnotations3d(ann3d);
+            if (showNotification) {
+                notification.success({ message: 'Annotations refreshed' });
             }
+        } catch (err: any) {
+            notification.error({
+                message: 'Failed to load annotations',
+                description: err?.message,
+            });
         }
+    }, [job2d, job3d]);
 
+    // Initial annotation fetch
+    useEffect(() => {
         fetchAnnotations();
-        return () => { cancelled = true; };
-    }, [frame, job2d, job3d]);
+    }, [fetchAnnotations]);
 
     // When selectedLinkId changes, auto-select paired annotations
     useEffect(() => {
@@ -197,31 +212,15 @@ function FusionPage(props: Props): JSX.Element {
         if (paired3d) setSelected3d(paired3d);
     }, [selectedLinkId, annotations2d, annotations3d]);
 
-    const handleSelect2d = useCallback((state: any) => {
-        setSelected2d(state);
-        const lid = getLinkIdFromState(state);
-        if (lid) setSelectedLinkId(lid);
-    }, []);
-
-    const handleSelect3d = useCallback((state: any) => {
-        setSelected3d(state);
-        const lid = getLinkIdFromState(state);
-        if (lid) setSelectedLinkId(lid);
-    }, []);
-
     const handleSelectLinkId = useCallback((linkId: string | null) => {
         setSelectedLinkId(linkId);
     }, []);
 
-    const refreshAnnotations = useCallback(async () => {
-        if (!job2d || !job3d) return;
-        const [ann2d, ann3d] = await Promise.all([
-            job2d.annotations.get(frame),
-            job3d.annotations.get(frame),
-        ]);
-        setAnnotations2d(ann2d);
-        setAnnotations3d(ann3d);
-    }, [frame, job2d, job3d]);
+    const handleRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await fetchAnnotations(true);
+        setRefreshing(false);
+    }, [fetchAnnotations]);
 
     const handleLink = useCallback(async () => {
         if (!selected2d || !selected3d) return;
@@ -229,11 +228,9 @@ function FusionPage(props: Props): JSX.Element {
         try {
             const uuid = generateUUID();
 
-            // Find link_id attribute spec on 2D label
             const spec2d = selected2d.label?.attributes?.find(
                 (attr: any) => attr.name === LINK_ID_ATTR_NAME,
             );
-            // Find link_id attribute spec on 3D label
             const spec3d = selected3d.label?.attributes?.find(
                 (attr: any) => attr.name === LINK_ID_ATTR_NAME,
             );
@@ -254,14 +251,19 @@ function FusionPage(props: Props): JSX.Element {
                 job3d.annotations.put([selected3d]),
             ]);
 
-            setSelectedLinkId(uuid);
-            await refreshAnnotations();
+            await Promise.all([
+                job2d.annotations.save(),
+                job3d.annotations.save(),
+            ]);
 
-            notification.success({ message: 'Annotations linked' });
+            setSelectedLinkId(uuid);
+            await fetchAnnotations();
+
+            notification.success({ message: 'Annotations linked & saved' });
         } catch (err: any) {
             notification.error({ message: 'Link failed', description: err?.message });
         }
-    }, [selected2d, selected3d, job2d, job3d, refreshAnnotations]);
+    }, [selected2d, selected3d, job2d, job3d, fetchAnnotations]);
 
     const handleUnlink = useCallback(async () => {
         if (!selectedLinkId) return;
@@ -297,17 +299,21 @@ function FusionPage(props: Props): JSX.Element {
             }
 
             await Promise.all(promises);
+            await Promise.all([
+                job2d.annotations.save(),
+                job3d.annotations.save(),
+            ]);
 
             setSelectedLinkId(null);
             setSelected2d(null);
             setSelected3d(null);
-            await refreshAnnotations();
+            await fetchAnnotations();
 
-            notification.success({ message: 'Annotations unlinked' });
+            notification.success({ message: 'Annotations unlinked & saved' });
         } catch (err: any) {
             notification.error({ message: 'Unlink failed', description: err?.message });
         }
-    }, [selectedLinkId, annotations2d, annotations3d, job2d, job3d, refreshAnnotations]);
+    }, [selectedLinkId, annotations2d, annotations3d, job2d, job3d, fetchAnnotations]);
 
     const handleSave = useCallback(async () => {
         if (!job2d || !job3d) return;
@@ -338,7 +344,7 @@ function FusionPage(props: Props): JSX.Element {
     if (error) {
         return (
             <div style={{ padding: 32 }}>
-                <Alert type='error' showIcon message='Fusion Viewer Error' description={error} />
+                <Alert type='error' showIcon message='Fusion Editor Error' description={error} />
             </div>
         );
     }
@@ -347,52 +353,104 @@ function FusionPage(props: Props): JSX.Element {
         <Layout style={{ height: '100vh', overflow: 'hidden' }}>
             {/* Header */}
             <div style={{
-                padding: '8px 16px',
+                padding: '6px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 borderBottom: '1px solid #e8e8e8',
                 background: '#fff',
+                flexShrink: 0,
             }}
             >
                 <Title level={4} style={{ margin: 0 }}>
                     {headerLabel}
                 </Title>
-                <Button type='primary' icon={<SaveOutlined />} onClick={handleSave}>
-                    Save
-                </Button>
+                <Tooltip title='Reload annotations from both editors to sync link state'>
+                    <Button
+                        icon={<ReloadOutlined spin={refreshing} />}
+                        onClick={handleRefresh}
+                        loading={refreshing}
+                    >
+                        Refresh Annotations
+                    </Button>
+                </Tooltip>
             </div>
 
-            {/* Frame slider */}
-            <div style={{ padding: '4px 16px 0' }}>
-                <Slider
-                    min={0}
-                    max={maxFrame}
-                    value={frame}
-                    onChange={(val: number) => setFrame(val)}
-                    tipFormatter={(val) => `Frame ${val}`}
-                />
-            </div>
-
-            {/* Panels */}
+            {/* Side-by-side annotation editors */}
             <Row style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} gutter={0}>
-                <Col span={12} style={{ height: '100%' }}>
-                    <Canvas2DPanel
-                        job={job2d}
-                        frame={frame}
-                        annotations={annotations2d}
-                        selectedLinkId={selectedLinkId}
-                        onSelectAnnotation={handleSelect2d}
-                    />
+                <Col span={12} style={{ height: '100%', borderRight: '2px solid #d9d9d9' }}>
+                    <div style={{
+                        padding: '4px 8px',
+                        background: '#f5f5f5',
+                        borderBottom: '1px solid #e8e8e8',
+                        flexShrink: 0,
+                    }}
+                    >
+                        <Text strong>2D Editor</Text>
+                        {iframe2dUrl && (
+                            <Text type='secondary' style={{ marginLeft: 8 }}>
+                                {iframe2dUrl}
+                            </Text>
+                        )}
+                    </div>
+                    {iframe2dUrl ? (
+                        <iframe
+                            src={iframe2dUrl}
+                            title='2D Annotation Editor'
+                            style={{
+                                width: '100%',
+                                height: 'calc(100% - 30px)',
+                                border: 'none',
+                            }}
+                        />
+                    ) : (
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '100%',
+                        }}
+                        >
+                            <Spin tip='Loading 2D editor…' />
+                        </div>
+                    )}
                 </Col>
                 <Col span={12} style={{ height: '100%' }}>
-                    <Canvas3DPanel
-                        job={job3d}
-                        frame={frame}
-                        annotations={annotations3d}
-                        selectedLinkId={selectedLinkId}
-                        onSelectAnnotation={handleSelect3d}
-                    />
+                    <div style={{
+                        padding: '4px 8px',
+                        background: '#f5f5f5',
+                        borderBottom: '1px solid #e8e8e8',
+                        flexShrink: 0,
+                    }}
+                    >
+                        <Text strong>3D Editor</Text>
+                        {iframe3dUrl && (
+                            <Text type='secondary' style={{ marginLeft: 8 }}>
+                                {iframe3dUrl}
+                            </Text>
+                        )}
+                    </div>
+                    {iframe3dUrl ? (
+                        <iframe
+                            src={iframe3dUrl}
+                            title='3D Annotation Editor'
+                            style={{
+                                width: '100%',
+                                height: 'calc(100% - 30px)',
+                                border: 'none',
+                            }}
+                        />
+                    ) : (
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '100%',
+                        }}
+                        >
+                            <Spin tip='Loading 3D editor…' />
+                        </div>
+                    )}
                 </Col>
             </Row>
 
