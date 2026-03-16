@@ -1,0 +1,18 @@
+[project]
+name = "fusion-demo-seed"
+version = "0.1.0"
+description = "Fusion demo seed — creates sample 2D + 3D CVAT tasks with linked annotations."
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.31",
+    "pillow>=10.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+pythonpath = ["."]

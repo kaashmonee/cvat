@@ -80,3 +80,7 @@ cvat-ui/dist
 
 # random targz
 *.tar.gz
+
+# uv / pytest artifacts in utils/
+utils/.venv/
+utils/.pytest_cache/

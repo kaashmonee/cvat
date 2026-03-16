@@ -38,8 +38,8 @@ services:
       HTTPS_PROXY: ""
       no_proxy: "cvat_server,cvat-server,localhost,127.0.0.1"
       NO_PROXY: "cvat_server,cvat-server,localhost,127.0.0.1"
-    entrypoint: ["bash", "/opt/fusion-demo/seed.sh"]
+    entrypoint: ["python3", "/opt/fusion-demo/seed.py"]
     volumes:
-      - ./utils/fusion_demo_seed.sh:/opt/fusion-demo/seed.sh:ro
+      - ./utils/fusion_demo_seed.py:/opt/fusion-demo/seed.py:ro
     networks:
       - cvat

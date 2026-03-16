@@ -39,7 +39,7 @@
 - Supporting panels in `panels/`: `link-controls.tsx` (Link/Unlink/Save), `annotation-list.tsx` (linked pair table).
 - Legacy view-only panels (`canvas2d-panel.tsx`, `canvas3d-panel.tsx`) remain in `panels/` but are no longer imported.
 - Linking logic uses a `link_id` text attribute on labels (see `consts.ts`); link/unlink/save operate via cvat-core API.
-- Demo overlay: `docker-compose.fusion-demo.yml` + `utils/fusion_demo_seed.sh` seeds 2D task #1 and 3D task #2.
+- Demo overlay: `docker-compose.fusion-demo.yml` + `utils/fusion_demo_seed.py` seeds 2D task #1 and 3D task #2.
 
 ### Running the Fusion Demo
 1. Build images (suppress proxy for UI build if on corporate network):
