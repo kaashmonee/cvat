@@ -49,8 +49,8 @@ RUN curl -sL https://github.com/cisco/openh264/archive/v${OPENH264_VERSION}.tar.
     make -j5 && make install-shared PREFIX=${PREFIX} && make clean
 
 WORKDIR /tmp/ffmpeg
-RUN curl -sL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.gz --output - | \
-    tar -zx --strip-components=1 && \
+COPY ffmpeg-${FFMPEG_VERSION}.tar.gz /tmp/ffmpeg-${FFMPEG_VERSION}.tar.gz
+RUN tar -zxf /tmp/ffmpeg-${FFMPEG_VERSION}.tar.gz --strip-components=1 && \
     ./configure --disable-nonfree --disable-gpl --enable-libopenh264 \
         --enable-shared --disable-static --disable-doc --disable-programs --prefix="${PREFIX}" && \
     make -j5 && make install && make clean
