@@ -32,6 +32,12 @@ services:
       CVAT_HOST: ${CVAT_HOST:-localhost}
       CVAT_DEMO_USER: ${CVAT_DEMO_USER:-admin}
       CVAT_DEMO_PASS: ${CVAT_DEMO_PASS:-admin}
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      no_proxy: "cvat_server,cvat-server,localhost,127.0.0.1"
+      NO_PROXY: "cvat_server,cvat-server,localhost,127.0.0.1"
     entrypoint: ["bash", "/opt/fusion-demo/seed.sh"]
     volumes:
       - ./utils/fusion_demo_seed.sh:/opt/fusion-demo/seed.sh:ro
