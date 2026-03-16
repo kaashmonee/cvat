@@ -459,8 +459,21 @@ jobs:
 
       - name: Run fusion demo (one-command smoke test)
         run: |
-          chmod +x ./utils/setup_fusion_demo.sh
-          ./utils/setup_fusion_demo.sh
+          docker compose -f docker-compose.yml -f docker-compose.fusion-demo.yml up -d
+          # Wait for the init container to finish (max 5 min)
+          for i in $(seq 1 300); do
+            STATUS=$(docker inspect -f '{{.State.Status}}' cvat_fusion_demo_init 2>/dev/null || echo "unknown")
+            if [ "$STATUS" = "exited" ]; then
+              EXIT_CODE=$(docker inspect -f '{{.State.ExitCode}}' cvat_fusion_demo_init 2>/dev/null || echo "1")
+              if [ "$EXIT_CODE" != "0" ]; then
+                echo "Init container failed with exit code $EXIT_CODE"
+                docker logs cvat_fusion_demo_init
+                exit 1
+              fi
+              break
+            fi
+            sleep 1
+          done
 
       - name: Verify demo tasks via API
         run: |
